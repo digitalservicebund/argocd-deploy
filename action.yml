@@ -1,0 +1,96 @@
+name: Deploy
+description: "ArgoCD based deploy action. Requires kustomize to run."
+
+inputs:
+  environment:
+    required: true
+    description: "Environment to deploy to, e.g. staging, production."
+  version:
+    required: true
+    description: "Container image tag being deployed, e.g. a commit SHA."
+  deploying_repo:
+    required: true
+    description: "List of image repositories (image names) being deployed."
+  infra_repo:
+    required: true
+    description: "Repository for ArgoCD to pick up changes from."
+  deploy_key:
+    required: true
+    description: "Private key, with its public counterpart expected to be attached to `infra_repo` as deploy key."
+  app:
+    required: true
+    description: "ArgoCD application to be deployed."
+  argocd_pipeline_password:
+    required: true
+    description: "Password for the `pipeline` user in ArgoCD (read-only permissions for such user are sufficient)."
+  argocd_server:
+    required: true
+    description: "Host name of the server where ArgoCD runs, e.g. argocd.example.com"
+  argocd_sync_timeout:
+    required: false
+    default: "120"
+    description: "Timeout applied to the argocd sync trigger"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout infra repository
+      uses: actions/checkout@v4
+      with:
+        repository: digitalservicebund/${{ inputs.infra_repo }}
+        ssh-key: ${{ inputs.deploy_key }}
+    - name: Update image tag for ${{ inputs.environment }}
+      env:
+        DEPLOYING_REPOS: ${{ inputs.deploying_repo }}
+      shell: bash
+      run: |
+        set -ex
+        cd manifests/overlays/${{ inputs.environment }}
+        IFS=,
+        for repo in $DEPLOYING_REPOS
+        do
+          kustomize edit set image ghcr.io/digitalservicebund/${repo}:${{ inputs.version }}
+        done
+    - name: Commit and push changes for infra repository
+      shell: bash
+      run: |
+        set -ex
+        git config user.name "${{ github.workflow }}"
+        # This email identifies the commit as GitHub Actions - see https://github.com/orgs/community/discussions/26560
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add manifests/overlays/${{ inputs.environment }}/kustomization.yaml
+        git diff-index --cached --quiet HEAD ||
+          git commit -m "Bump ${{ inputs.environment }} image to ${{ inputs.version }}" -m "[skip ci]" &&
+          git push origin main
+    - name: Determine ArgoCD version
+      id: argocd-version
+      shell: bash
+      run: |
+        set -ex
+        argocd_version=$(curl -s https://${ARGOCD_SERVER}/api/version | jq -r '.Version | split("+")[0]')
+        echo "version=$argocd_version" >> $GITHUB_OUTPUT
+      env:
+        ARGOCD_SERVER: ${{ inputs.argocd_server }}
+    - name: Cache argocd executable
+      id: cache-argocd
+      uses: actions/cache@v4
+      with:
+        path: argocd
+        key: ${{ steps.argocd-version.outputs.version }}-argocd
+    - name: Download argocd executable
+      if: steps.cache-argocd.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -ex
+        curl -sSL -o argocd "https://github.com/argoproj/argo-cd/releases/download/${{ steps.argocd-version.outputs.version }}/argocd-linux-amd64"
+    - name: Trigger Argo CD sync
+      shell: bash
+      run: |
+        set -ex
+        chmod +x argocd
+        ./argocd login ${ARGOCD_SERVER} --username pipeline --password ${{ inputs.argocd_pipeline_password }} --grpc-web
+        ./argocd app wait ${{ inputs.app }} --sync --timeout ${{ inputs.argocd_sync_timeout }} --grpc-web
+        ./argocd app get --refresh ${{ inputs.app }} --grpc-web > /dev/null
+        ./argocd app wait ${{ inputs.app }} --sync --health --timeout ${{ inputs.argocd_sync_timeout }} --grpc-web
+      env:
+        ARGOCD_SERVER: ${{ inputs.argocd_server }}
