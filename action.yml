@@ -39,7 +39,7 @@ runs:
   using: "composite"
   steps:
     - name: Checkout infra repository
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
       with:
         repository: digitalservicebund/${{ inputs.infra_repo }}
         ref: ${{ inputs.infra_branch }}
