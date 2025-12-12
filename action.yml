@@ -96,7 +96,7 @@ runs:
         ARGOCD_SERVER: ${{ inputs.argocd_server }}
     - name: "Cache argocd executable"
       id: cache-argocd
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: argocd
         key: ${{ steps.argocd-version.outputs.version }}-argocd
