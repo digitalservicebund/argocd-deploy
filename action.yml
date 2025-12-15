@@ -27,9 +27,9 @@ inputs:
   app:
     required: true
     description: "ArgoCD application to be deployed."
-  argocd_pipeline_password:
+  argocd_auth_token:
     required: true
-    description: "Password for the `pipeline` user in ArgoCD (read-only permissions for such user are sufficient)."
+    description: "Auth token of the `pipeline` user in ArgoCD (read-only permissions for such user are sufficient)."
   argocd_server:
     required: true
     description: "Host name of the server where ArgoCD runs, e.g. argocd.example.com"
@@ -111,9 +111,9 @@ runs:
       run: |
         set -ex
         chmod +x argocd
-        ./argocd login ${ARGOCD_SERVER} --username pipeline --password ${{ inputs.argocd_pipeline_password }} --grpc-web
         ./argocd app wait ${{ inputs.app }} --sync --timeout ${{ inputs.argocd_sync_timeout }} --grpc-web
         ./argocd app get --refresh ${{ inputs.app }} --grpc-web > /dev/null
         ./argocd app wait ${{ inputs.app }} --sync --health --timeout ${{ inputs.argocd_sync_timeout }} --grpc-web
       env:
         ARGOCD_SERVER: ${{ inputs.argocd_server }}
+        ARGOCD_AUTH_TOKEN: ${{ inputs.argocd_auth_token }}
