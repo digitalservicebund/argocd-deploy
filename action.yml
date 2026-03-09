@@ -75,11 +75,11 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        INFRA_REPO: ${{ inputs.infra_repo }}
         INFRA_BRANCH: ${{ inputs.infra_branch }}
         ENVIRONMENT: ${{ inputs.environment }}
         VERSION: ${{ inputs.version }}
         DEPLOYING_REPO: ${{ inputs.deploying_repo }}
+        REPO: digitalservicebund/${{ inputs.infra_repo }}
       run: |
         set -ex
 
@@ -90,45 +90,21 @@ runs:
           exit 0
         fi
 
-        # Use the GitHub API to create a verified commit
-        REPO="digitalservicebund/${INFRA_REPO}"
         FILE_PATH="manifests/overlays/${ENVIRONMENT}/kustomization.yaml"
         FILE_CONTENT=$(base64 -i "${FILE_PATH}")
-        HEAD_SHA=$(git rev-parse HEAD)
-        TREE_SHA=$(git rev-parse HEAD^{tree})
+        FILE_SHA=$(git rev-parse HEAD:"${FILE_PATH}")
 
-        # Create a new blob with the updated file content
-        BLOB_SHA=$(gh api "repos/${REPO}/git/blobs" \
-          -f content="${FILE_CONTENT}" \
-          -f encoding="base64" \
-          --jq '.sha')
-
-        # Create a new tree with the updated file
-        NEW_TREE_SHA=$(gh api "repos/${REPO}/git/trees" \
-          -f base_tree="${TREE_SHA}" \
-          -f tree[][path]="${FILE_PATH}" \
-          -f tree[][mode]="100644" \
-          -f tree[][type]="blob" \
-          -f tree[][sha]="${BLOB_SHA}" \
-          --jq '.sha')
-
-        # Create a verified commit via the API
-        # Omit author/committer so GitHub auto-signs the commit as the App
         COMMIT_MESSAGE="Bump ${ENVIRONMENT} image to ${VERSION}
 
-        Repository: ${DEPLOYING_REPO}
-
+        Deploying Repository: ${DEPLOYING_REPO}
         [skip ci]"
-        NEW_COMMIT_SHA=$(gh api "repos/${REPO}/git/commits" \
-          -f message="${COMMIT_MESSAGE}" \
-          -f tree="${NEW_TREE_SHA}" \
-          -f parents[]="${HEAD_SHA}" \
-          --jq '.sha')
 
-        # Update the branch ref to point to the new commit
-        gh api "repos/${REPO}/git/refs/heads/${INFRA_BRANCH}" \
-          -X PATCH \
-          -f sha="${NEW_COMMIT_SHA}"
+        gh api "repos/${REPO}/contents/${FILE_PATH}" \
+          -X PUT \
+          -f message="${COMMIT_MESSAGE}" \
+          -f content="${FILE_CONTENT}" \
+          -f sha="${FILE_SHA}" \
+          -f branch="${INFRA_BRANCH}"
     - name: "Determine ArgoCD version"
       id: argocd-version
       shell: bash
