@@ -77,18 +77,69 @@ runs:
       run: echo "user-id=$(gh api "/users/${{ steps.app-token.outputs.app-slug }}[bot]" --jq .id)" >> "$GITHUB_OUTPUT"
       env:
         GH_TOKEN: ${{ steps.app-token.outputs.token }}
-    - name: "Git Config"
+    - name: "Commit and push changes to infra repo"
       shell: bash
+      env:
+        GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        INFRA_REPO: ${{ inputs.infra_repo }}
+        INFRA_BRANCH: ${{ inputs.infra_branch }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        VERSION: ${{ inputs.version }}
+        APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        APP_USER_ID: ${{ steps.get-user-id.outputs.user-id }}
+        DEPLOYING_REPO: ${{ inputs.deploying_repo }}
       run: |
-        git config --global user.name '${{ steps.app-token.outputs.app-slug }}[bot]'
-        git config --global user.email '${{ steps.get-user-id.outputs.user-id }}+${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com'
-    - name: "Commit an push changes to infra repo"
-      shell: bash
-      run: |
-        git add manifests/overlays/${{ inputs.environment }}/kustomization.yaml
-        git diff-index --cached --quiet HEAD ||
-          git commit -m "Bump ${{ inputs.environment }} image to ${{ inputs.version }}" -m "[skip ci]" &&
-          git push origin ${{ inputs.infra_branch }}
+        set -ex
+
+        # Check if there are any changes to commit
+        git add manifests/overlays/${ENVIRONMENT}/kustomization.yaml
+        if git diff-index --cached --quiet HEAD; then
+          echo "No changes to commit."
+          exit 0
+        fi
+
+        # Use the GitHub API to create a verified commit
+        REPO="digitalservicebund/${INFRA_REPO}"
+        FILE_PATH="manifests/overlays/${ENVIRONMENT}/kustomization.yaml"
+        FILE_CONTENT=$(base64 -i "${FILE_PATH}")
+        HEAD_SHA=$(git rev-parse HEAD)
+        TREE_SHA=$(git rev-parse HEAD^{tree})
+
+        # Create a new blob with the updated file content
+        BLOB_SHA=$(gh api "repos/${REPO}/git/blobs" \
+          -f content="${FILE_CONTENT}" \
+          -f encoding="base64" \
+          --jq '.sha')
+
+        # Create a new tree with the updated file
+        NEW_TREE_SHA=$(gh api "repos/${REPO}/git/trees" \
+          -f base_tree="${TREE_SHA}" \
+          -f tree[][path]="${FILE_PATH}" \
+          -f tree[][mode]="100644" \
+          -f tree[][type]="blob" \
+          -f tree[][sha]="${BLOB_SHA}" \
+          --jq '.sha')
+
+        # Create a verified commit via the API
+        COMMIT_MESSAGE="Bump ${ENVIRONMENT} image to ${VERSION}
+
+        Repository: ${DEPLOYING_REPO}
+
+        [skip ci]"
+        NEW_COMMIT_SHA=$(gh api "repos/${REPO}/git/commits" \
+          -f message="${COMMIT_MESSAGE}" \
+          -f tree="${NEW_TREE_SHA}" \
+          -f parents[]="${HEAD_SHA}" \
+          -f "author[name]=${APP_SLUG}[bot]" \
+          -f "author[email]=${APP_USER_ID}+${APP_SLUG}[bot]@users.noreply.github.com" \
+          -f "committer[name]=${APP_SLUG}[bot]" \
+          -f "committer[email]=${APP_USER_ID}+${APP_SLUG}[bot]@users.noreply.github.com" \
+          --jq '.sha')
+
+        # Update the branch ref to point to the new commit
+        gh api "repos/${REPO}/git/refs/heads/${INFRA_BRANCH}" \
+          -X PATCH \
+          -f sha="${NEW_COMMIT_SHA}"
     - name: "Determine ArgoCD version"
       id: argocd-version
       shell: bash
