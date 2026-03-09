@@ -71,12 +71,6 @@ runs:
         do
           kustomize edit set image ghcr.io/digitalservicebund/${repo}:${{ inputs.version }}
         done
-    - name: "Get GitHub App User ID"
-      shell: bash
-      id: get-user-id
-      run: echo "user-id=$(gh api "/users/${{ steps.app-token.outputs.app-slug }}[bot]" --jq .id)" >> "$GITHUB_OUTPUT"
-      env:
-        GH_TOKEN: ${{ steps.app-token.outputs.token }}
     - name: "Commit and push changes to infra repo"
       shell: bash
       env:
@@ -85,8 +79,6 @@ runs:
         INFRA_BRANCH: ${{ inputs.infra_branch }}
         ENVIRONMENT: ${{ inputs.environment }}
         VERSION: ${{ inputs.version }}
-        APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
-        APP_USER_ID: ${{ steps.get-user-id.outputs.user-id }}
         DEPLOYING_REPO: ${{ inputs.deploying_repo }}
       run: |
         set -ex
@@ -121,6 +113,7 @@ runs:
           --jq '.sha')
 
         # Create a verified commit via the API
+        # Omit author/committer so GitHub auto-signs the commit as the App
         COMMIT_MESSAGE="Bump ${ENVIRONMENT} image to ${VERSION}
 
         Repository: ${DEPLOYING_REPO}
@@ -130,10 +123,6 @@ runs:
           -f message="${COMMIT_MESSAGE}" \
           -f tree="${NEW_TREE_SHA}" \
           -f parents[]="${HEAD_SHA}" \
-          -f "author[name]=${APP_SLUG}[bot]" \
-          -f "author[email]=${APP_USER_ID}+${APP_SLUG}[bot]@users.noreply.github.com" \
-          -f "committer[name]=${APP_SLUG}[bot]" \
-          -f "committer[email]=${APP_USER_ID}+${APP_SLUG}[bot]@users.noreply.github.com" \
           --jq '.sha')
 
         # Update the branch ref to point to the new commit
