@@ -96,7 +96,7 @@ runs:
 
         COMMIT_MESSAGE="Bump ${ENVIRONMENT} image to ${VERSION}
 
-        Deploying Repository: ${DEPLOYING_REPO}
+        Deploying Repository: https://github.com/digitalservicebund/${DEPLOYING_REPO}
         [skip ci]"
 
         gh api "repos/${REPO}/contents/${FILE_PATH}" \
