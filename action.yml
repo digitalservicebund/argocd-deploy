@@ -46,7 +46,7 @@ runs:
   using: "composite"
   steps:
     - name: "Create GitHub App token"
-      uses: actions/create-github-app-token@v2
+      uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
       id: app-token
       with:
         app-id: ${{ inputs.github_app_id }}
@@ -54,7 +54,7 @@ runs:
         owner: digitalservicebund
         repositories: ${{ inputs.infra_repo }}
     - name: "Checkout infra repository"
-      uses: actions/checkout@v6
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       with:
         repository: digitalservicebund/${{ inputs.infra_repo }}
         ref: ${{ inputs.infra_branch }}
@@ -116,7 +116,7 @@ runs:
         ARGOCD_SERVER: ${{ inputs.argocd_server }}
     - name: "Cache argocd executable"
       id: cache-argocd
-      uses: actions/cache@v5
+      uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
       with:
         path: argocd
         key: ${{ steps.argocd-version.outputs.version }}-argocd
