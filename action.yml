@@ -27,9 +27,9 @@ inputs:
   app:
     required: true
     description: "ArgoCD application to be deployed."
-  argocd_pipeline_password:
+  argocd_auth_token:
     required: true
-    description: "Password for the `pipeline` user in ArgoCD (read-only permissions for such user are sufficient)."
+    description: "Auth token of the `pipeline` user in ArgoCD (read-only permissions for such user are sufficient)."
   argocd_server:
     required: true
     description: "Host name of the server where ArgoCD runs, e.g. argocd.example.com"
@@ -37,6 +37,10 @@ inputs:
     required: false
     default: "120"
     description: "Timeout applied to the argocd sync trigger"
+  wait_for_healthy_app:
+    required: false
+    default: "true"
+    description: "Whether to wait for the ArgoCD app to become healthy after syncing. If false, the last health check step is skipped."
 
 runs:
   using: "composite"
@@ -67,24 +71,40 @@ runs:
         do
           kustomize edit set image ghcr.io/digitalservicebund/${repo}:${{ inputs.version }}
         done
-    - name: "Get GitHub App User ID"
+    - name: "Commit and push changes to infra repo"
       shell: bash
-      id: get-user-id
-      run: echo "user-id=$(gh api "/users/${{ steps.app-token.outputs.app-slug }}[bot]" --jq .id)" >> "$GITHUB_OUTPUT"
       env:
         GH_TOKEN: ${{ steps.app-token.outputs.token }}
-    - name: "Git Config"
-      shell: bash
+        INFRA_BRANCH: ${{ inputs.infra_branch }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        VERSION: ${{ inputs.version }}
+        DEPLOYING_REPO: ${{ inputs.deploying_repo }}
+        REPO: digitalservicebund/${{ inputs.infra_repo }}
       run: |
-        git config --global user.name '${{ steps.app-token.outputs.app-slug }}[bot]'
-        git config --global user.email '${{ steps.get-user-id.outputs.user-id }}+${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com'
-    - name: "Commit an push changes to infra repo"
-      shell: bash
-      run: |
-        git add manifests/overlays/${{ inputs.environment }}/kustomization.yaml
-        git diff-index --cached --quiet HEAD ||
-          git commit -m "Bump ${{ inputs.environment }} image to ${{ inputs.version }}" -m "[skip ci]" &&
-          git push origin ${{ inputs.infra_branch }}
+        set -ex
+
+        # Check if there are any changes to commit
+        git add manifests/overlays/${ENVIRONMENT}/kustomization.yaml
+        if git diff-index --cached --quiet HEAD; then
+          echo "No changes to commit."
+          exit 0
+        fi
+
+        FILE_PATH="manifests/overlays/${ENVIRONMENT}/kustomization.yaml"
+        FILE_CONTENT=$(base64 -i "${FILE_PATH}")
+        FILE_SHA=$(git rev-parse HEAD:"${FILE_PATH}")
+
+        COMMIT_MESSAGE="Bump ${ENVIRONMENT} image to ${VERSION}
+
+        Deploying Repository: https://github.com/digitalservicebund/${DEPLOYING_REPO}
+        [skip ci]"
+
+        gh api "repos/${REPO}/contents/${FILE_PATH}" \
+          -X PUT \
+          -f message="${COMMIT_MESSAGE}" \
+          -f content="${FILE_CONTENT}" \
+          -f sha="${FILE_SHA}" \
+          -f branch="${INFRA_BRANCH}"
     - name: "Determine ArgoCD version"
       id: argocd-version
       shell: bash
@@ -111,9 +131,11 @@ runs:
       run: |
         set -ex
         chmod +x argocd
-        ./argocd login ${ARGOCD_SERVER} --username pipeline --password ${{ inputs.argocd_pipeline_password }} --grpc-web
         ./argocd app wait ${{ inputs.app }} --sync --timeout ${{ inputs.argocd_sync_timeout }} --grpc-web
         ./argocd app get --refresh ${{ inputs.app }} --grpc-web > /dev/null
-        ./argocd app wait ${{ inputs.app }} --sync --health --timeout ${{ inputs.argocd_sync_timeout }} --grpc-web
+        if [ "${{ inputs.wait_for_healthy_app }}" = "true" ]; then
+          ./argocd app wait ${{ inputs.app }} --sync --health --timeout ${{ inputs.argocd_sync_timeout }} --grpc-web
+        fi
       env:
         ARGOCD_SERVER: ${{ inputs.argocd_server }}
+        ARGOCD_AUTH_TOKEN: ${{ inputs.argocd_auth_token }}
