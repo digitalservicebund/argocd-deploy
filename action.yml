@@ -21,9 +21,9 @@ inputs:
   github_app_private_key:
     required: true
     description: "Private key of a Github App that has Repository Content Read & Write access to the infra repo."
-  github_app_id:
+  github_app_client_id:
     required: true
-    description: "App ID of a Github App that has Repository Content Read & Write access to the infra repo."
+    description: "Client ID of a Github App that has Repository Content Read & Write access to the infra repo."
   app:
     required: true
     description: "ArgoCD application to be deployed."
@@ -49,7 +49,7 @@ runs:
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
       id: app-token
       with:
-        app-id: ${{ inputs.github_app_id }}
+        client-id: ${{ inputs.github_app_client_id }}
         private-key: ${{ inputs.github_app_private_key }}
         owner: digitalservicebund
         repositories: ${{ inputs.infra_repo }}
